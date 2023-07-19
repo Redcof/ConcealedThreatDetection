@@ -1,5 +1,5 @@
 outs:
-- md5: ffa4cd6a7b47f4c2b2d217ba9db6b27f.dir
-  size: 148642
-  nfiles: 2
+- md5: 550d06a11502efdb23df1fe71fae1214.dir
+  size: 397258432
+  nfiles: 6317
   path: THZ_dataset
