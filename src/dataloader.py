@@ -2,6 +2,8 @@ import os.path
 import pathlib
 from xml.etree import ElementTree
 
+import torch
+import torchvision.transforms
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -13,49 +15,53 @@ class ATZDataset(Dataset):
     to provide Active Terahertz Imaging Dataset for Concealed Object Detection(https://github.com/LingLIx/THz_Dataset)
     """
     
-    def __init__(self, root: str, split: str, image_transform=None, label_transform=None, bbox_transform=None):
+    def __init__(self, root: str, split: str, cfg):
         assert split in ("train", "test", "val")
         self.data_dir = pathlib.Path(root)
         self.image_dir = self.data_dir / "JPEGImages"
-        self.anno_dir = self.data_dir / "Annotation"
+        self.anno_dir = self.data_dir / "Annotations"
         self.collection_file = self.data_dir / ("%s.txt" % split)
+        self.cfg = cfg
         assert os.path.isdir(self.data_dir)
         assert os.path.isdir(self.image_dir)
         assert os.path.isdir(self.anno_dir)
         assert os.path.isfile(self.collection_file)
         # load filenames form split files
         with open(self.collection_file) as fp:
-            self.filenames = list(map(lambda x: x.strip(), fp.readlines()))
-        self.image_transform = image_transform
-        self.label_transform = label_transform
-        self.bbox_transform = bbox_transform
+            # skip files with no annotation
+            self.filenames = list(filter(lambda fnm: len(self.get_objects(self.anno_dir / ("%s.xml" % fnm))) > 0,
+                                         map(lambda x: x.strip(), fp.readlines())))
     
-    @staticmethod
-    def read_vocxml_content(xml_file: str):
+    def get_objects(self, xml_file: str):
         tree = ElementTree.parse(xml_file)
         root = tree.getroot()
-        
-        list_with_all_boxes = []
-        
-        filename = root.find('filename').text
-        for boxes in root.iter('object'):
-            class_ = boxes.find("name").text
-            ymin = int(boxes.find("bndbox/ymin").text)
-            xmin = int(boxes.find("bndbox/xmin").text)
-            ymax = int(boxes.find("bndbox/ymax").text)
-            xmax = int(boxes.find("bndbox/xmax").text)
-            cx = (xmin + xmax) / 2
-            cy = (ymin + ymax) / 2
-            
-            list_with_single_boxes = (xmin, ymin, xmax, ymax, cx, cy, class_)
-            list_with_all_boxes.append(list_with_single_boxes)
-        
-        return filename, list_with_all_boxes
+        # Skip Object of Interest for IGNORE classes
+        OOI = list(filter(lambda _box: _box.find("name").text in self.cfg.dataset.classnames, root.iter('object')))
+        N = len(OOI)
+        return OOI
+    
+    def read_vocxml_content(self, xml_file: str):
+        # Skip HUMAN bboxes
+        OOI = self.get_objects(xml_file)
+        N = len(OOI)
+        assert N > 0, "At-least 1 object is required"
+        boxes = torch.zeros((N, 4), dtype=torch.float32)
+        labels = torch.zeros((N,), dtype=torch.int64)
+        for idx, box in enumerate(OOI):
+            class_ = box.find("name").text
+            ymin = int(box.find("bndbox/ymin").text)
+            xmin = int(box.find("bndbox/xmin").text)
+            ymax = int(box.find("bndbox/ymax").text)
+            xmax = int(box.find("bndbox/xmax").text)
+            boxes[idx, :] = torch.tensor((xmin, ymin, xmax, ymax), dtype=torch.float32)
+            labels[idx] = self.cfg.dataset.classnames.index(class_)
+        return boxes, labels
     
     def __len__(self):
         return len(self.filenames)
     
     def __getitem__(self, idx):
         filename = self.filenames[idx]
-        image = Image.open(self.image_dir / ("%s.jpeg" % filename)).convert("RGB")
-        bboxes = self.read_vocxml_content(self.anno_dir / ("%s.xml" % filename))
+        image = torchvision.transforms.ToTensor()(Image.open(self.image_dir / ("%s.jpg" % filename)).convert("RGB"))
+        targets = self.read_vocxml_content(self.anno_dir / ("%s.xml" % filename))
+        return image, targets

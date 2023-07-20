@@ -1,2 +1,4 @@
 dvc==2.34.0
-poetry==1.5.1
+easydict==1.10
+torchmetrics==0.10.0
+numpy==1.19.5

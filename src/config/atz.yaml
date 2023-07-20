@@ -1,0 +1,29 @@
+name: concealed_threat_det
+random_seed: 47
+dataset:
+  name: atz
+  voc_data: True
+  data_root: ../data/THZ_dataset/THZ_dataset_det_VOC
+  class_file: ../data/THZ_dataset/THZ_dataset_det_VOC/classes.txt
+model:
+  name: fasterrcnn_resnet50_fpn
+  weights: DEFAULT
+train:
+  flag: True
+  batch_size: 8
+  lr: 0.001
+  lr_schedule_warmup_epoch: 1
+  lr_schedule:
+    name: LinearLR
+    start_factor: 1
+    total_iters: 5
+  start_epoch: 1
+  max_epoch: 5
+  finetune:
+    flag: True
+    checkpoint_path: ''
+  save_schedule: best # provide saving frequency, an integer, or best
+  metrics: MeanAveragePrecision, MeanAveragePrecision
+inference:
+  flag: False
+  checkpoint_path: ''
