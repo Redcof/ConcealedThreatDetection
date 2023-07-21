@@ -1,24 +1,28 @@
 name: concealed_threat_det
+exp_name_postfix: alpha
 random_seed: 47
 dataset:
   name: atz
   voc_data: True
-  data_root: ../data/THZ_dataset/THZ_dataset_det_VOC
-  class_file: ../data/THZ_dataset/THZ_dataset_det_VOC/classes.txt
+  data_root: ./data/THZ_dataset/THZ_dataset_det_VOC
+  class_file: ./data/THZ_dataset/THZ_dataset_det_VOC/classes.txt
+framework: pytorch
 model:
   name: fasterrcnn_resnet50_fpn
   weights: DEFAULT
 train:
   flag: True
   batch_size: 8
+  optimizer:
+    name: RMSprop
   lr: 0.001
   lr_schedule_warmup_epoch: 1
   lr_schedule:
     name: LinearLR
     start_factor: 1
-    total_iters: 5
+    total_iters: 2
   start_epoch: 1
-  max_epoch: 5
+  max_epoch: 1
   finetune:
     flag: True
     checkpoint_path: ''

@@ -1,4 +1,7 @@
-dvc==2.34.0
-easydict==1.10
-torchmetrics==0.10.0
-numpy==1.19.5
+dagshub==0.2.21 # Jul 19, 2023
+dvc==2.34.0 # Nov 7, 2022
+mlflow==1.30.1 # Oct 21, 2022
+torchmetrics==0.10.0 # Oct 5, 2022
+python-dotenv==0.20.0 # Mar 25, 2022
+easydict==1.10 # Sep 28, 2022
+numpy==1.19.5 # Jan 5, 2021

@@ -35,9 +35,12 @@ def get_dataloader(cfg, split, collate_fn_wrap=dataloader_collate_fn):
     return dataloader
 
 
-@read('config/atz.yaml')
+@read('./src/config/atz.yaml')
 def main(cfg):
-    model_trainer = FasterRCNN_ResNet50_FPN_Trainer(cfg)
+    if cfg.framework == "pytorch":
+        model_trainer = FasterRCNN_ResNet50_FPN_Trainer(cfg)
+    else:
+        raise NotImplemented("Framework: %s" % cfg.framework)
     if cfg.train.flag:
         train_dataloader = None
         test_dataloader = None

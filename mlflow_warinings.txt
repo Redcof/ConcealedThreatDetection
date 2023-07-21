@@ -1,0 +1,4 @@
+2023/07/21 19:27:06 WARNING mlflow.utils.requirements_utils: Found torch version (2.0.1+cu117) contains a local version label (+cu117). MLflow logged a pip requirement for this package as 'torch==2.0.1' without the local version label to make it installable from PyPI. To specify pip requirements containing local version labels, please use `conda_env` or `pip_requirements`.
+2023/07/21 19:27:28 WARNING mlflow.utils.requirements_utils: Found torchvision version (0.15.2+cu117) contains a local version label (+cu117). MLflow logged a pip requirement for this package as 'torchvision==0.15.2' without the local version label to make it installable from PyPI. To specify pip requirements containing local version labels, please use `conda_env` or `pip_requirements`.
+C:\Users\yyy\Anaconda3\envs\.mlops\lib\site-packages\_distutils_hack\__init__.py:33: UserWarning: Setuptools is replacing distutils.
+  warnings.warn("Setuptools is replacing distutils.")
