@@ -1,8 +1,8 @@
 from torch.utils.data import DataLoader
 
-from src.config.config import read
-from src.dataloader import ATZDataset
-from src.pytorch_object_detection import FasterRCNN_ResNet50_FPN_Trainer
+from config.config import read
+from dataloader import ATZDataset
+from pytorch_object_detection import FasterRCNN_ResNet50_FPN_Trainer
 
 
 def dataloader_collate_fn(device):
