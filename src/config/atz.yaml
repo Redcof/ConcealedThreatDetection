@@ -1,5 +1,5 @@
-name: concealed_threat_det
-exp_name_postfix: alpha
+name: cdt
+exp_name_postfix: IP-10.73.24.37
 random_seed: 47
 dataset:
   name: atz
@@ -12,7 +12,7 @@ model:
   weights: DEFAULT
 train:
   flag: True
-  batch_size: 8
+  batch_size: 32
   optimizer:
     name: RMSprop
   lr: 0.001
@@ -22,7 +22,7 @@ train:
     start_factor: 1
     total_iters: 2
   start_epoch: 1
-  max_epoch: 1
+  max_epoch: 50
   finetune:
     flag: True
     checkpoint_path: ''
