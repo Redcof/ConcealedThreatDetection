@@ -1,5 +1,5 @@
 name: cdt
-experiment_description: Reduced batch size to 16. Save model with requirements.txt. Save scripted variant of the model
+experiment_description: Epoch=300 from 5. Merge train+test for training, test for testing to check overfitting
 exp_name_postfix: IP-10.73.24.37
 random_seed: 47
 dataset:
@@ -24,7 +24,7 @@ train:
     start_factor: 1
     total_iters: 2
   start_epoch: 1
-  max_epoch: 50
+  max_epoch: 300
   finetune:
     flag: True
     checkpoint_path: ''

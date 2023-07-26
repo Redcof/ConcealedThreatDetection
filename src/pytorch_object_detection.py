@@ -228,7 +228,8 @@ class PytorchDetectionTrainer:
                                      pip_requirements="../requirements.txt")
             mlflow.pytorch.log_model(torch.jit.script(self.net), "output/model/scripted",
                                      signature=self.mlflow_model_io_signature,
-                                     pip_requirements="../requirements.txt")
+                                     pip_requirements="./requirements.txt")
+            # torch.onnx.export(self.net, x, "faster_rcnn.onnx", opset_version=11)
             print("Done")
         self.stop_tracking()
         return self.net
