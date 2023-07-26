@@ -6,3 +6,6 @@ fsspec==2022.10.0
 python-dotenv==0.20.0 # Mar 25, 2022
 easydict==1.10 # Sep 28, 2022
 numpy==1.19.5 # Jan 5, 2021
+torch==2.0.1
+torchaudio==2.0.2
+torchvision==0.15.2

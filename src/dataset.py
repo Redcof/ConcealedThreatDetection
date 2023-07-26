@@ -15,7 +15,7 @@ class ATZDataset(Dataset):
     to provide Active Terahertz Imaging Dataset for Concealed Object Detection(https://github.com/LingLIx/THz_Dataset)
     """
     
-    def __init__(self, root: str, split: str, cfg):
+    def __init__(self, root: str, split: str, cfg, image_transform=None):
         assert split in ("train", "test", "val")
         self.data_dir = pathlib.Path(root)
         self.image_dir = self.data_dir / "JPEGImages"
@@ -37,7 +37,6 @@ class ATZDataset(Dataset):
         root = tree.getroot()
         # Skip Object of Interest for IGNORE classes
         OOI = list(filter(lambda _box: _box.find("name").text in self.cfg.dataset.classnames, root.iter('object')))
-        N = len(OOI)
         return OOI
     
     def read_vocxml_content(self, xml_file: str):

@@ -8,19 +8,21 @@ import mlflow
 import pandas as pd
 import torch
 import torchvision
-from torch import optim
+from torch import optim, nn
 from torch.backends import cudnn
+from torchgen.context import F
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, FasterRCNN_ResNet50_FPN_Weights
 
 
-class FasterRCNN_ResNet50_FPN_Trainer:
+class PytorchDetectionTrainer:
     def __init__(self, cfg):
         """
         Returns:
         https://pytorch.org/vision/stable/models/generated/torchvision.models.detection.fasterrcnn_resnet50_fpn.html
         #torchvision.models.detection.fasterrcnn_resnet50_fpn
         """
+        self.forward = None
         self.mlflow_model_io_signature = None
         self.cfg = cfg
         self.set_randomness()
@@ -29,41 +31,89 @@ class FasterRCNN_ResNet50_FPN_Trainer:
         self.optimizer = self.build_optimizer()
     
     def build_model(self):
-        if self.cfg.model.name == "fasterrcnn_resnet50_fpn":
+        model_name = self.cfg.model.name
+        num_classes = self.cfg.dataset.num_classes
+        if model_name == "fasterrcnn_resnet50_fpn":
             if self.cfg.model.weights == "DEFAULT":
                 weights = FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-            else:
+                pretrained = True
+            elif self.cfg.model.weights == "COCO_V1":
                 weights = FasterRCNN_ResNet50_FPN_Weights.COCO_V1
-            model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True,
+                pretrained = True
+            else:
+                pretrained = False
+                weights = None
+            model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=pretrained,
                                                                          weights=weights)
             in_features = model.roi_heads.box_predictor.cls_score.in_features
-            model.roi_heads.box_predictor = FastRCNNPredictor(in_features, self.cfg.dataset.num_classes)
-            return model
+            model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+            
+            def forward(list_input, list_target):
+                loss_dict = model(list_input, list_target)
+                return sum(v for v in loss_dict.values())
+        elif model_name == "custom_resnet":
+            class DetectionModel(nn.Module):
+                def __init__(self):
+                    super(DetectionModel, self).__init__()
+                    from torchvision.models import ResNet34_Weights
+                    resnet = torchvision.models.resnet34(weights=ResNet34_Weights.DEFAULT)
+                    layers = list(resnet.children())[:8]
+                    self.features1 = nn.Sequential(*layers[:6])
+                    self.features2 = nn.Sequential(*layers[6:])
+                    self.classifier = nn.Sequential(nn.BatchNorm1d(512), nn.Linear(512, 4))
+                    self.bb = nn.Sequential(nn.BatchNorm1d(512), nn.Linear(512, 4))
+                
+                def forward(self, x):
+                    x = self.features1(x)
+                    x = self.features2(x)
+                    x = F.relu(x)
+                    x = nn.AdaptiveAvgPool2d((1, 1))(x)
+                    x = x.view(x.shape[0], -1)
+                    return self.classifier(x), self.bb(x)
+            
+            model = DetectionModel()
+            
+            def forward(batch_input, batch_target):
+                y_bb, y_class = batch_target
+                # forward pass
+                out_cls, out_bbox = model(batch_input)
+                # calculate class loss
+                loss_class = F.cross_entropy(out_cls, y_class, reduction="sum")
+                # calculate bbox loss
+                loss_bb = F.l1_loss(out_bbox, y_bb, reduction="none").sum(1)
+                loss_bb = loss_bb.sum()
+                loss = loss_class + loss_bb / num_classes
+                return loss
         else:
             raise NotImplemented("Model: %s" % self.cfg.model.name)
+        self.forward = forward
+        return model
     
     def build_optimizer(self):
         if self.cfg.train.optimizer.name == "RMSprop":
             return optim.RMSprop(self.net.parameters(), lr=self.cfg.train.lr)
+        elif self.cfg.train.optimizer.name == "Adam":
+            return optim.Adam(self.net.parameters(), lr=self.cfg.train.lr)
     
     def build_lr_scheduler(self):
-        lr_schedule_dict = self.cfg.train.lr_schedule
-        if lr_schedule_dict['name'] == "LinearLR":
-            kwargs = {k: v for k, v in lr_schedule_dict.items() if k != "name"}
-            return torch.optim.lr_scheduler.LinearLR(
-                self.optimizer, **kwargs
-            )
-        else:
-            raise NotImplemented("LR Schedule: %s" % self.cfg.train.lr_schedule.name)
+        if self.cfg.train.lr_schedule.flag:
+            lr_schedule_dict = self.cfg.train.lr_schedule
+            if lr_schedule_dict['name'] == "LinearLR":
+                kwargs = {k: v for k, v in lr_schedule_dict.items() if k != "name"}
+                return torch.optim.lr_scheduler.LinearLR(
+                    self.optimizer, **kwargs
+                )
+            else:
+                raise NotImplemented("LR Schedule: %s" % self.cfg.train.lr_schedule.name)
     
     def train_one_epoch(self, train_dataloader, epoch_idx, max_epoch):
         losses = torch.tensor(-1)
         self.net.train()
-        for batch_idx, (list_inputs, list_targets) in enumerate(train_dataloader):
+        for batch_idx, (batch_inputs, batch_targets) in enumerate(train_dataloader):
             # Forward pass with losses
-            loss_dict = self.net(list_inputs, list_targets)
+            # output = self.net(batch_inputs, batch_targets)
             # sum classification losses + bbox regression losses
-            losses = sum(v for v in loss_dict.values())
+            losses = self.forward(batch_inputs, batch_targets)
             # set gradient to zero
             # Calculate gradient
             self.optimizer.zero_grad()
@@ -75,9 +125,8 @@ class FasterRCNN_ResNet50_FPN_Trainer:
             # mlflow experiment tracking
             mlflow.log_metrics(dict(step_loss=losses), step=((epoch_idx - 1) * self.cfg.train.batch_size) + batch_idx)
             # CLEAN GPU RAM  ########################
-            del list_inputs
-            del list_targets
-            del loss_dict
+            del batch_inputs
+            del batch_targets
             # Fix: https://discuss.pytorch.org/t/how-to-totally-free-allocate-memory-in-cuda/79590
             torch.cuda.empty_cache()
             gc.collect()
@@ -164,10 +213,12 @@ class FasterRCNN_ResNet50_FPN_Trainer:
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
             # calculate mAP
-            mAP_values = self.evaluate(test_dataloader, epoch_idx)
-            print("\nTraining Epoch %d Loss: %0.4e mAP:%0.4f" % (
+            mAP_train_values = self.evaluate(train_dataloader, epoch_idx, "train")
+            mAP_test_values = self.evaluate(test_dataloader, epoch_idx, "test")
+            print("\nTraining Epoch %d Loss: %0.4e Train mAP:%0.4f Test mAP:%0.4f" % (
                 epoch_idx, losses,
-                mAP_values['map']
+                mAP_train_values['train_map'],
+                mAP_test_values['test_map']
             ))
         # mlflow track model
         if self.mlflow_model_io_signature is not None and self.cfg.framework == "pytorch":
@@ -195,7 +246,7 @@ class FasterRCNN_ResNet50_FPN_Trainer:
                                                                            pd.DataFrame(sample_output))
     
     @torch.no_grad()
-    def evaluate(self, test_dataloader, epoch_idx):
+    def evaluate(self, test_dataloader, epoch_idx, prefix):
         # https://github.com/haochen23/Faster-RCNN-fine-tune-PyTorch/blob/master/engine.py#L69
         n_threads = torch.get_num_threads()
         torch.set_num_threads(1)
@@ -232,9 +283,17 @@ class FasterRCNN_ResNet50_FPN_Trainer:
         evaluator_time = time.time()
         mAP_values = map_metric.compute()
         evaluator_time = time.time() - evaluator_time
+        mAP_values = {"%s_%s" % (prefix, key): value for key, value in mAP_values.items()}
         # mlflow track experiment
-        mlflow.log_metrics(dict(evaluator_time=evaluator_time), step=epoch_idx)
-        mlflow.log_metrics(dict(epoch_inference_time=model_time), step=epoch_idx)
+        if prefix == "train":
+            mlflow.log_metrics(dict(train_evaluator_time=evaluator_time), step=epoch_idx)
+            mlflow.log_metrics(dict(train_epoch_inference_time=model_time), step=epoch_idx)
+        if prefix == "test":
+            mlflow.log_metrics(dict(test_evaluator_time=evaluator_time), step=epoch_idx)
+            mlflow.log_metrics(dict(test_epoch_inference_time=model_time), step=epoch_idx)
+        if prefix == "val":
+            mlflow.log_metrics(dict(val_evaluator_time=evaluator_time), step=epoch_idx)
+            mlflow.log_metrics(dict(val_epoch_inference_time=model_time), step=epoch_idx)
         mlflow.log_metrics(mAP_values, step=epoch_idx)
         torch.set_num_threads(n_threads)
         return mAP_values

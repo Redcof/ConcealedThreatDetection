@@ -1,5 +1,5 @@
-name: cdt
-exp_name_postfix: IP-10.73.24.37
+name: coding
+exp_name_postfix: local
 random_seed: 47
 dataset:
   name: atz
@@ -12,7 +12,7 @@ model:
   weights: None
 train:
   flag: True
-  batch_size: 32
+  batch_size: 6
   optimizer:
     name: Adam
   lr: 0.001
@@ -28,7 +28,7 @@ train:
     flag: True
     checkpoint_path: ''
   save_schedule: best # provide saving frequency, an integer, or best
-  metrics: MeanAveragePrecision, MeanAveragePrecision
+  metrics: MeanAveragePrecision
 inference:
   flag: False
   checkpoint_path: ''
