@@ -1,4 +1,5 @@
 name: cdt
+experiment_description: Reduced batch size to 16. Save model with requirements.txt. Save scripted variant of the model
 exp_name_postfix: IP-10.73.24.37
 random_seed: 47
 dataset:
@@ -12,7 +13,7 @@ model:
   weights: None
 train:
   flag: True
-  batch_size: 32
+  batch_size: 16
   optimizer:
     name: Adam
   lr: 0.001

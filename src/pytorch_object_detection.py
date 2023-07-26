@@ -158,7 +158,7 @@ class PytorchDetectionTrainer:
         mlflow.set_experiment(experiment_name=self.cfg.exp_name)
         # mlflow.autolog(log_models=True)
         # dagshub.init(os.environ['DAGSHUB_REPO'], os.environ['DAGSHUB_USERNAME'], mlflow=True)
-        mlflow.start_run()
+        mlflow.start_run(description=self.cfg.experiment_description)
         run = mlflow.active_run()
         print("Active mlflow run_id: {} started...".format(run.info.run_id))
     
@@ -222,8 +222,13 @@ class PytorchDetectionTrainer:
             ))
         # mlflow track model
         if self.mlflow_model_io_signature is not None and self.cfg.framework == "pytorch":
-            print("Logging model to mlflow...", end="")
-            mlflow.pytorch.log_model(self.net, "output/model", signature=self.mlflow_model_io_signature)
+            print("Logging model to mlflow backend...", end="")
+            mlflow.pytorch.log_model(self.net, "output/model",
+                                     signature=self.mlflow_model_io_signature,
+                                     pip_requirements="../requirements.txt")
+            mlflow.pytorch.log_model(torch.jit.script(self.net), "output/model/scripted",
+                                     signature=self.mlflow_model_io_signature,
+                                     pip_requirements="../requirements.txt")
             print("Done")
         self.stop_tracking()
         return self.net
