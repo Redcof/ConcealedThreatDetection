@@ -1,5 +1,6 @@
 name: coding
 exp_name_postfix: local
+experiment_description: Merge train+test+val for training, test for testing to check overfitting
 random_seed: 47
 dataset:
   name: atz

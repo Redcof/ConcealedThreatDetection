@@ -160,12 +160,13 @@ class PytorchDetectionTrainer:
         # dagshub.init(os.environ['DAGSHUB_REPO'], os.environ['DAGSHUB_USERNAME'], mlflow=True)
         mlflow.start_run(description=self.cfg.experiment_description)
         run = mlflow.active_run()
-        print("Active mlflow run_id: {} started...".format(run.info.run_id))
+        
+        print("Active mlflow run_name:{} run_id: {} started...".format(run.info.run_id, run.info.run_name))
     
     def stop_tracking(self):
         run = mlflow.active_run()
         mlflow.end_run()
-        print("Active mlflow run_id: {} stopped.".format(run.info.run_id))
+        print("Active mlflow run_name:{} run_id: {} stopped.".format(run.info.run_id, run.info.run_name))
     
     def track_config(self):
         d = dict(self.cfg)
@@ -225,7 +226,7 @@ class PytorchDetectionTrainer:
             print("Logging model to mlflow backend...", end="")
             mlflow.pytorch.log_model(self.net, "output/model",
                                      signature=self.mlflow_model_io_signature,
-                                     pip_requirements="../requirements.txt")
+                                     pip_requirements="./requirements.txt")
             mlflow.pytorch.log_model(torch.jit.script(self.net), "output/model/scripted",
                                      signature=self.mlflow_model_io_signature,
                                      pip_requirements="./requirements.txt")

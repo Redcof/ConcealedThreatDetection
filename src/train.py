@@ -90,6 +90,12 @@ def main(cfg):
                                              collate_fn=collate_fn_wrap(cfg.device),
                                              shuffle=True)
             val_dataloader = get_dataloader(cfg, 'val', collate_fn_wrap=collate_fn_wrap)
+            combined_train_dataset = torch.utils.data.ConcatDataset(
+                [train_dataloader.dataset, test_dataloader.dataset, val_dataloader.dataset])
+            combined_dataloader = DataLoader(dataset=combined_train_dataset, batch_size=cfg.train.batch_size,
+                                             drop_last=True,
+                                             collate_fn=collate_fn_wrap(cfg.device),
+                                             shuffle=True)
         else:
             assert cfg.dataset.voc_data, "Only VOC dataset in implemented"
         model_trainer.train(combined_dataloader, test_dataloader)
