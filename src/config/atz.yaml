@@ -29,10 +29,10 @@ train:
     flag: True
     checkpoint_path: ''
   save_schedule: # config when to save/log model
-    type: metric # [epoch: epoch intervals, metric: highest performance, loss: lowest loss, otherwise save it at the end of training]
-    key: test_map_70 # [if type=epoch, key=<integer>, if type=metric, key=<metric_name>, if type=loss, key=<loss_name>(in case we have multiple losses)]
-    threshold: 0.02 # [an increase threshold of performance and a decrease loss to log the model]
-    # Provide saving frequency,
+    type: metric # [epoch: epoch intervals, metric: highest performance, loss: lowest loss]
+    key: test_map_75 # [if type=epoch, key=<integer>, if type=metric, key=<metric_name>, if type=loss, key=<loss_name>(in case we have multiple losses)]
+    threshold: 0.6 # [minimum threshold after which the models should be considered for logging]
+    value_delta: 0.02 # [an increase threshold of performance and a decrease loss to log the model]
   metrics: MeanAveragePrecision
 inference:
   flag: False
