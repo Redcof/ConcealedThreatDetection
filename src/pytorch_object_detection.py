@@ -209,6 +209,7 @@ class PytorchDetectionTrainer:
         # dagshub.init(os.environ['DAGSHUB_REPO'], os.environ['DAGSHUB_USERNAME'], mlflow=True)
         mlflow.start_run(description=self.cfg.experiment_description)
         run = mlflow.active_run()
+        # track additional hparmas
         self.track_config()
         print("Active mlflow run_name:{} run_id: {} started...".format(run.info.run_name, run.info.run_id))
     
@@ -282,10 +283,9 @@ class PytorchDetectionTrainer:
             
             # mlflow track progress
             progress = ((epoch_idx / (self.cfg.train.max_epoch + 1)) * 100)
-            mlflow.log_params(dict(progress="%d%%" % progress, epoch=epoch_idx))
-            mlflow.log_metrics(dict(epoch_time=epoch_time))
+            mlflow.log_metrics(dict(epoch_time=epoch_time), step=epoch_idx)
             print(
-                "\nTraining Progress: %d%% Epoch [%d/%d] Loss: %0.4e Train map@IoU0.75:%0.4f Test map@IoU0.75:%0.4f" % (
+                "\nTraining Progress: %0.2f%% Epoch [%d/%d] Loss: %0.4e Train map@IoU0.75:%0.4f Test map@IoU0.75:%0.4f" % (
                     progress,
                     epoch_idx, self.cfg.train.max_epoch + 1, losses,
                     mAP_train_values['train_map_75'],
@@ -319,7 +319,7 @@ class PytorchDetectionTrainer:
         elif schedule_type == "metric":
             # get the current value
             current_value = train_performance[schedule_key] if (train_performance
-                                                                       and schedule_key in train_performance) else (
+                                                                and schedule_key in train_performance) else (
                 test_performance[schedule_key] if (
                     test_performance and schedule_key in test_performance) else None
             )
@@ -385,8 +385,8 @@ class PytorchDetectionTrainer:
         # run evaluation loop
         self.net.eval()
         for batch_idx, (list_image, list_targets) in enumerate(test_dataloader):
-            print("\rEvaluating... Epoch %d Batch [%d/%d] " % (
-                epoch_idx, batch_idx + 1, len(test_dataloader)), end="\b")
+            print("\rEvaluating...%s Epoch %d Batch [%d/%d] " % (
+                prefix, epoch_idx, batch_idx + 1, len(test_dataloader)), end="\b")
             start_time = time.time()
             list_prediction = self.net(list_image)
             delta = time.time() - start_time
