@@ -26,7 +26,7 @@ class PytorchDetectionTrainer:
         https://pytorch.org/vision/stable/models/generated/torchvision.models.detection.fasterrcnn_resnet50_fpn.html
         #torchvision.models.detection.fasterrcnn_resnet50_fpn
         """
-        self.last_value = None
+        self.bast_value = None
         self.model_saved_earlier = False
         self.forward = None
         self.mlflow_model_io_signature = None
@@ -324,28 +324,30 @@ class PytorchDetectionTrainer:
                     test_performance and schedule_key in test_performance) else None
             )
             if current_value is not None:
-                if self.last_value is None:
+                if self.bast_value is None:
                     # Last value none indicated the training just started.
                     # set the last_value to current_value
-                    self.last_value = current_value
+                    self.bast_value = current_value
                 if (current_value >= threshold
-                    and current_value > self.last_value
-                    and abs(current_value - self.last_value) >= schedule_delta):
+                    and current_value > self.bast_value
+                    and abs(current_value - self.bast_value) >= schedule_delta):
                     self.model_saved_earlier = True
+                    self.bast_value = current_value
                     flag = True
         elif schedule_type == "loss":
             current_value = loss.item() if loss is not None else None
             if current_value is None:
                 flag = False
             else:
-                if self.last_value is None:
+                if self.bast_value is None:
                     # Last value none indicated the training just started.
                     # set the last_value to current_value
-                    self.last_value = current_value
+                    self.bast_value = current_value
                 if (current_value <= threshold
-                    and current_value < self.last_value
-                    and abs(current_value - self.last_value) >= schedule_delta):
+                    and current_value < self.bast_value
+                    and abs(current_value - self.bast_value) >= schedule_delta):
                     self.model_saved_earlier = True
+                    self.bast_value = current_value
                     flag = True
         else:
             # do nothing
