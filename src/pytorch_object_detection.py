@@ -142,11 +142,12 @@ class PytorchDetectionTrainer:
     
     @read_yaml('./earlystop.yaml')
     def is_early_stop(self, cfg, epoch_idx=-1):
-        print("Early stopping...", end="")
         if cfg.hard_stop_now:
+            print("Early stopping...", end="")
             print("HARD STOP.")
             return True
         if cfg.stop_at_epoch == epoch_idx and cfg.stop_at_epoch != -1:
+            print("Early stopping...", end="")
             print("EPOCH STOP.")
             return True
     
