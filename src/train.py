@@ -4,7 +4,7 @@ import numpy as np
 import torch.utils.data
 from torch.utils.data import DataLoader
 
-from config.config import read
+from config.config import read_config
 from dataset import ATZDataset
 from pytorch_object_detection import PytorchDetectionTrainer
 
@@ -70,7 +70,7 @@ def get_dataloader(cfg, split, collate_fn_wrap):
 
 def main(cfg):
     if cfg.framework == "pytorch":
-        model_trainer = PytorchDetectionTrainer(cfg)
+        model_trainer = PytorchDetectionTrainer(cfg, (-1, 880, 355))
     else:
         raise NotImplemented("Framework: %s" % cfg.framework)
     if cfg.train.flag:
@@ -84,11 +84,6 @@ def main(cfg):
                 collate_fn_wrap = dataloader_collate_fn
             train_dataloader = get_dataloader(cfg, 'train', collate_fn_wrap=collate_fn_wrap)
             test_dataloader = get_dataloader(cfg, 'test', collate_fn_wrap=collate_fn_wrap)
-            combined_train_dataset = torch.utils.data.ConcatDataset([train_dataloader.dataset, test_dataloader.dataset])
-            combined_dataloader = DataLoader(dataset=combined_train_dataset, batch_size=cfg.train.batch_size,
-                                             drop_last=True,
-                                             collate_fn=collate_fn_wrap(cfg.device),
-                                             shuffle=True)
             val_dataloader = get_dataloader(cfg, 'val', collate_fn_wrap=collate_fn_wrap)
             combined_train_dataset = torch.utils.data.ConcatDataset(
                 [train_dataloader.dataset, test_dataloader.dataset, val_dataloader.dataset])
@@ -115,7 +110,7 @@ if __name__ == '__main__':
     args = parse_args()
     
     
-    @read(args.cfg_file)
+    @read_config(args.cfg_file)
     def config(cfg):
         return cfg
     

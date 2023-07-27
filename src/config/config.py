@@ -10,7 +10,7 @@ def update_args(cfg):
     return cfg
 
 
-def read(yaml_path, modify_with_args=True, load_env=True):
+def read_config(yaml_path, modify_with_args=True, load_env=True):
     def decorated(f):
         def wrapper(*args, **kwargs):
             # read config file
@@ -31,6 +31,22 @@ def read(yaml_path, modify_with_args=True, load_env=True):
             cfg.python = sys.version
             cfg.exp_name = "%s_%s_%s_%s" % (cfg.name, cfg.dataset.name, cfg.model.name, cfg.exp_name_postfix)
             result = f(cfg, *args, **kwargs)
+            return result
+        
+        return wrapper
+    
+    return decorated
+
+
+def read_yaml(yaml_path, modify_with_args=True, load_env=True):
+    def decorated(f):
+        def wrapper(*args, **kwargs):
+            # read config file
+            with open(yaml_path) as fp:
+                cfg = yaml.full_load(fp)
+                from easydict import EasyDict
+                cfg = EasyDict(cfg)
+            result = f(*args, cfg, **kwargs)
             return result
         
         return wrapper

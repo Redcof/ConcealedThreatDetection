@@ -5,26 +5,33 @@ import random
 import time
 
 import mlflow
-import pandas as pd
+import numpy as np
 import torch
 import torchvision
+from mlflow.models import ModelSignature
+from mlflow.types import Schema, TensorSpec
 from torch import optim, nn
 from torch.backends import cudnn
 from torchgen.context import F
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, FasterRCNN_ResNet50_FPN_Weights
 
+from config.config import read_yaml
+
 
 class PytorchDetectionTrainer:
-    def __init__(self, cfg):
+    def __init__(self, cfg, imagedim):
         """
         Returns:
         https://pytorch.org/vision/stable/models/generated/torchvision.models.detection.fasterrcnn_resnet50_fpn.html
         #torchvision.models.detection.fasterrcnn_resnet50_fpn
         """
+        self.last_value = None
+        self.model_saved_earlier = False
         self.forward = None
         self.mlflow_model_io_signature = None
         self.cfg = cfg
+        self.imagedim = imagedim
         self.set_randomness()
         self.lr_scheduler = None
         self.net = self.build_model()
@@ -49,8 +56,22 @@ class PytorchDetectionTrainer:
             model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
             
             def forward(list_input, list_target):
+                # forward pass for FasterRCNN model
                 loss_dict = model(list_input, list_target)
                 return sum(v for v in loss_dict.values())
+            
+            # this requires numpy ndarray or pandas dataframe datatype
+            # as our input is a tensor we can freely convert it to numpy-array
+            # as our out is a dictionary we can freely convert it to pandas dataframe
+            input_schema = Schema(
+                [TensorSpec(np.dtype(np.float32), (-1, 880, 335))]
+            )
+            output_schema = Schema([
+                TensorSpec(np.dtype(np.float32), (-1, 4), "boxes"),
+                TensorSpec(np.dtype(np.float32), (-1, 1), "scores"),
+                TensorSpec(np.dtype(np.int64), (-1, 1), "labels"),
+            ])
+            self.mlflow_model_io_signature = ModelSignature(inputs=input_schema, outputs=output_schema)
         elif model_name == "custom_resnet":
             class DetectionModel(nn.Module):
                 def __init__(self):
@@ -84,6 +105,19 @@ class PytorchDetectionTrainer:
                 loss_bb = loss_bb.sum()
                 loss = loss_class + loss_bb / num_classes
                 return loss
+            
+            # this requires numpy ndarray or pandas dataframe datatype
+            # as our input is a tensor we can freely convert it to numpy-array
+            # as our out is a dictionary we can freely convert it to pandas dataframe
+            input_schema = Schema(
+                [TensorSpec(np.dtype(np.float32), (-1, 880, 335))]
+            )
+            output_schema = Schema([
+                TensorSpec(np.dtype(np.float32), (-1, 4), "boxes"),
+                TensorSpec(np.dtype(np.float32), (-1, 1), "scores"),
+                TensorSpec(np.dtype(np.int64), (-1, 1), "labels"),
+            ])
+            self.mlflow_model_io_signature = ModelSignature(inputs=input_schema, outputs=output_schema)
         else:
             raise NotImplemented("Model: %s" % self.cfg.model.name)
         self.forward = forward
@@ -106,24 +140,35 @@ class PytorchDetectionTrainer:
             else:
                 raise NotImplemented("LR Schedule: %s" % self.cfg.train.lr_schedule.name)
     
+    @read_yaml('./earlystop.yaml')
+    def is_early_stop(self, cfg, epoch_idx=-1):
+        print("Early stopping...", end="")
+        if cfg.hard_stop_now:
+            print("HARD STOP.")
+            return True
+        if cfg.stop_at_epoch == epoch_idx and cfg.stop_at_epoch != -1:
+            print("EPOCH STOP.")
+            return True
+    
     def train_one_epoch(self, train_dataloader, epoch_idx, max_epoch):
-        losses = torch.tensor(-1)
+        loss = torch.tensor(-1)
         self.net.train()
         for batch_idx, (batch_inputs, batch_targets) in enumerate(train_dataloader):
-            # Forward pass with losses
+            # Forward pass with loss
             # output = self.net(batch_inputs, batch_targets)
-            # sum classification losses + bbox regression losses
-            losses = self.forward(batch_inputs, batch_targets)
+            # sum classification loss + bbox regression loss
+            loss = self.forward(batch_inputs, batch_targets)
             # set gradient to zero
             # Calculate gradient
             self.optimizer.zero_grad()
-            losses.backward()
+            loss.backward()
             # update parameters
             self.optimizer.step()
             print("\rTraining... Epoch [%d/%d] Batch [%d/%d] Loss [%0.4e] " % (
-                epoch_idx, max_epoch, batch_idx + 1, len(train_dataloader), losses), end="\b")
+                epoch_idx, max_epoch, batch_idx + 1, len(train_dataloader), loss), end="\b")
             # mlflow experiment tracking
-            mlflow.log_metrics(dict(step_loss=losses), step=((epoch_idx - 1) * self.cfg.train.batch_size) + batch_idx)
+            mlflow.log_metrics(dict(step_loss=loss.item()),
+                               step=((epoch_idx - 1) * self.cfg.train.batch_size) + batch_idx)
             # CLEAN GPU RAM  ########################
             del batch_inputs
             del batch_targets
@@ -132,10 +177,13 @@ class PytorchDetectionTrainer:
             gc.collect()
             # print("After memory_allocated(GB): ", torch.cuda.memory_allocated() / 1e9)
             # print("After memory_cached(GB): ", torch.cuda.memory_reserved() / 1e9)
-            # CLEAN GPU RAM ########################
+            # CLEAN GPU RAM #
+            if self.is_early_stop(epoch_idx=epoch_idx):
+                break
+            # ONE EPOCH LOOP ENDS #######################
         # mlflow experiment tracking
-        mlflow.log_metrics(dict(epoch_loss=losses), step=epoch_idx)
-        return losses
+        mlflow.log_metrics(dict(epoch_loss=loss.item()), step=epoch_idx)
+        return loss
     
     def set_randomness(self):
         manual_seed = self.cfg.random_seed
@@ -160,13 +208,13 @@ class PytorchDetectionTrainer:
         # dagshub.init(os.environ['DAGSHUB_REPO'], os.environ['DAGSHUB_USERNAME'], mlflow=True)
         mlflow.start_run(description=self.cfg.experiment_description)
         run = mlflow.active_run()
-        
-        print("Active mlflow run_name:{} run_id: {} started...".format(run.info.run_id, run.info.run_name))
+        self.track_config()
+        print("Active mlflow run_name:{} run_id: {} started...".format(run.info.run_name, run.info.run_id))
     
     def stop_tracking(self):
         run = mlflow.active_run()
         mlflow.end_run()
-        print("Active mlflow run_name:{} run_id: {} stopped.".format(run.info.run_id, run.info.run_name))
+        print("Active mlflow run_name:{} run_id: {} started...".format(run.info.run_name, run.info.run_id))
     
     def track_config(self):
         d = dict(self.cfg)
@@ -201,56 +249,128 @@ class PytorchDetectionTrainer:
         mlflow.set_experiment_tags(d)
     
     def train(self, train_dataloader, test_dataloader):
+        # mlflow start tracking
         self.start_tracking()
-        self.track_config()
+        
+        # track data stat
+        mlflow.log_params(dict(
+            train_datasize=len(train_dataloader.dataset),
+            train_batch_size=len(train_dataloader),
+            test_datasize=len(test_dataloader.dataset),
+            test_batch_size=len(test_dataloader),
+        ))
         self.net.to(self.cfg.device)
         self.net.train()
         print("Entering training loop...")
         for epoch_idx in range(self.cfg.train.start_epoch, self.cfg.train.max_epoch + 1, 1):
             if epoch_idx == self.cfg.train.lr_schedule_warmup_epoch:
                 self.lr_scheduler = self.build_lr_scheduler()
+            
             # train one epoch
+            epoch_time = time.time()
             losses = self.train_one_epoch(train_dataloader, epoch_idx, self.cfg.train.max_epoch)
+            epoch_time = time.time() - epoch_time
+            
+            # update LR
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
+            
             # calculate mAP
             mAP_train_values = self.evaluate(train_dataloader, epoch_idx, "train")
             mAP_test_values = self.evaluate(test_dataloader, epoch_idx, "test")
-            print("\nTraining Epoch %d Loss: %0.4e Train mAP:%0.4f Test mAP:%0.4f" % (
-                epoch_idx, losses,
-                mAP_train_values['train_map'],
-                mAP_test_values['test_map']
-            ))
-        # mlflow track model
-        if self.mlflow_model_io_signature is not None and self.cfg.framework == "pytorch":
-            print("Logging model to mlflow backend...", end="")
-            mlflow.pytorch.log_model(self.net, "output/model",
-                                     signature=self.mlflow_model_io_signature,
-                                     pip_requirements="./requirements.txt")
-            mlflow.pytorch.log_model(torch.jit.script(self.net), "output/model/scripted",
-                                     signature=self.mlflow_model_io_signature,
-                                     pip_requirements="./requirements.txt")
-            # torch.onnx.export(self.net, x, "faster_rcnn.onnx", opset_version=11)
-            print("Done")
+            
+            # mlflow track progress
+            progress = ((epoch_idx / (self.cfg.train.max_epoch + 1)) * 100)
+            mlflow.log_params(dict(progress="%d%%" % progress, epoch=epoch_idx))
+            mlflow.log_metrics(dict(epoch_time=epoch_time))
+            print(
+                "\nTraining Progress: %d%% Epoch [%d/%d] Loss: %0.4e Train map@IoU0.75:%0.4f Test map@IoU0.75:%0.4f" % (
+                    progress,
+                    epoch_idx, self.cfg.train.max_epoch + 1, losses,
+                    mAP_train_values['train_map_75'],
+                    mAP_test_values['test_map_75']
+                ))
+            
+            # mlflow track model
+            if self.can_i_log_model(epoch_idx, losses, mAP_train_values, mAP_test_values):
+                self.log_model("epoch_%d" % epoch_idx)
+            if self.is_early_stop(epoch_idx=epoch_idx):
+                break
+            # TRAIN LOOP ENDS ##############
+        if not self.model_saved_earlier:
+            self.log_model("epoch_last")
+        # mlflow stop tracking
         self.stop_tracking()
         return self.net
+    
+    def can_i_log_model(self, epoch_idx, loss, train_performance, test_performance):
+        schedule_type = self.cfg.train.save_schedule.type
+        schedule_key = self.cfg.train.save_schedule.key
+        schedule_delta = self.cfg.train.save_schedule.value_delta
+        threshold = self.cfg.train.save_schedule.threshold
+        flag = False
+        if schedule_type == "epoch":
+            if epoch_idx % schedule_key == 0:
+                self.model_saved_earlier = True
+                flag = True
+            else:
+                flag = False
+        elif schedule_type == "metric":
+            # get the current value
+            current_value = train_performance[schedule_key] if (train_performance
+                                                                       and schedule_key in train_performance) else (
+                test_performance[schedule_key] if (
+                    test_performance and schedule_key in test_performance) else None
+            )
+            if current_value is not None:
+                if self.last_value is None:
+                    # Last value none indicated the training just started.
+                    # set the last_value to current_value
+                    self.last_value = current_value
+                if (current_value >= threshold
+                    and current_value > self.last_value
+                    and abs(current_value - self.last_value) >= schedule_delta):
+                    self.model_saved_earlier = True
+                    flag = True
+        elif schedule_type == "loss":
+            current_value = loss.item() if loss is not None else None
+            if current_value is None:
+                flag = False
+            else:
+                if self.last_value is None:
+                    # Last value none indicated the training just started.
+                    # set the last_value to current_value
+                    self.last_value = current_value
+                if (current_value <= threshold
+                    and current_value < self.last_value
+                    and abs(current_value - self.last_value) >= schedule_delta):
+                    self.model_saved_earlier = True
+                    flag = True
+        else:
+            # do nothing
+            ...
+        return flag
+    
+    def log_model(self, dir_name):
+        if self.mlflow_model_io_signature is not None and self.cfg.framework == "pytorch":
+            print("Logging eager-model to mlflow backend...", end="")
+            mlflow.pytorch.log_model(self.net, "output/%s/model" % dir_name,
+                                     signature=self.mlflow_model_io_signature,
+                                     pip_requirements="./requirements.txt")
+            print("Done")
+            print("Logging script-model to mlflow backend...", end="")
+            mlflow.pytorch.log_model(torch.jit.script(self.net), "output/%s/scripted" % dir_name,
+                                     signature=self.mlflow_model_io_signature,
+                                     pip_requirements="./requirements.txt")
+            print("Done")
+            # torch.onnx.export(self.net, x, "faster_rcnn.onnx", opset_version=11)
     
     def build_metrics(self):
         metrics = ast.literal_eval(self.cfg.train.metrics)
     
-    def track_model_signature(self, image, prediction):
+    def track_model_signature(self, signature):
         if self.mlflow_model_io_signature is None:
-            # this requires numpy ndarray or pandas dataframe datatype
-            # as our input is a tensor we can freely convert it to numpy-array
-            # as our out is a dictionary we can freely convert it to pandas dataframe
-            to_cpu_numpy = lambda x: x.detach().cpu().numpy()
-            sample_output = {
-                "boxes": [float(1), float(1), float(1), float(1)],
-                "scores": float(1),
-                "labels": float(1),
-            }
-            self.mlflow_model_io_signature = mlflow.models.infer_signature(to_cpu_numpy(image),
-                                                                           pd.DataFrame(sample_output))
+            self.mlflow_model_io_signature = signature
     
     @torch.no_grad()
     def evaluate(self, test_dataloader, epoch_idx, prefix):
@@ -258,18 +378,17 @@ class PytorchDetectionTrainer:
         n_threads = torch.get_num_threads()
         torch.set_num_threads(1)
         cpu_device = torch.device("cpu")
-        self.net.eval()
         map_metric = MeanAveragePrecision()
         torch.cuda.synchronize()
         model_time = 0
+        # run evaluation loop
+        self.net.eval()
         for batch_idx, (list_image, list_targets) in enumerate(test_dataloader):
             print("\rEvaluating... Epoch %d Batch [%d/%d] " % (
                 epoch_idx, batch_idx + 1, len(test_dataloader)), end="\b")
             start_time = time.time()
             list_prediction = self.net(list_image)
             delta = time.time() - start_time
-            # mlflow track experiment
-            self.track_model_signature(list_image[0], list_prediction[0])
             # mlflow track experiment
             mlflow.log_metrics(dict(step_inference_time=model_time),
                                step=((epoch_idx - 1) * self.cfg.train.batch_size) + batch_idx)
@@ -287,10 +406,11 @@ class PytorchDetectionTrainer:
                 }]
                 map_metric.update(preds, target)
         
+        # calculate mAP performance
         evaluator_time = time.time()
         mAP_values = map_metric.compute()
         evaluator_time = time.time() - evaluator_time
-        mAP_values = {"%s_%s" % (prefix, key): value for key, value in mAP_values.items()}
+        mAP_values = {"%s_%s" % (prefix, key): value.item() for key, value in mAP_values.items()}
         # mlflow track experiment
         if prefix == "train":
             mlflow.log_metrics(dict(train_evaluator_time=evaluator_time), step=epoch_idx)
